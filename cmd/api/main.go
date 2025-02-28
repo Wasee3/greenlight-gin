@@ -37,8 +37,11 @@ func main() {
 	}
 
 	router := gin.Default()
+
+	router.Use(gin.Recovery())
 	router.GET("/v1/healthcheck", app.healthcheckHandler)
 	router.GET("/v1/movie/:id", app.showMovieHandler)
+	router.POST("/v1/movie", app.createMovieHandler)
 
 	err := router.Run(":" + strconv.Itoa(app.config.port))
 	logger.Error(err.Error())

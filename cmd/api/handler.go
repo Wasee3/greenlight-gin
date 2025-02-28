@@ -39,3 +39,25 @@ func (app *application) showMovieHandler(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
 	}
 }
+
+func (app *application) createMovieHandler(c *gin.Context) {
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1048576)
+
+	var input struct {
+		Title   string   `json:"title" binding:"required"`
+		Year    int32    `json:"year" binding:"required,gte=1999"`
+		Runtime int32    `json:"runtime" binding:"required"`
+		Genres  []string `json:"genres" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Data received successfully",
+		"data":    input,
+	})
+}
