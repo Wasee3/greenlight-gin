@@ -24,7 +24,7 @@ func main() {
 
 	var cfg config
 
-	flag.IntVar(&cfg.port, "port", 4000, "API server port")
+	flag.IntVar(&cfg.port, "port", 20000, "API server port")
 	flag.StringVar(&cfg.env, "env", "development", "Environment (development|staging|production)")
 	flag.Parse()
 
@@ -37,17 +37,8 @@ func main() {
 
 	router := gin.Default()
 	router.GET("/v1/healthcheck", app.healthcheckHandler)
+	router.GET("/v1/movie/:id", app.showMovieHandler)
 
-	// srv := &http.Server{
-	// 	Addr:         fmt.Sprintf(":%d", cfg.port),
-	// 	Handler:      mux,
-	// 	IdleTimeout:  time.Minute,
-	// 	ReadTimeout:  5 * time.Second,
-	// 	WriteTimeout: 10 * time.Second,
-	// 	ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelError),
-	// }
-	// Start the HTTP server.
-	// logger.Info("starting server", "addr", srv.Addr, "env", cfg.env)
 	err := router.Run()
 	logger.Error(err.Error())
 	os.Exit(1)
