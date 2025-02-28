@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log/slog"
 	"os"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -39,7 +40,7 @@ func main() {
 	router.GET("/v1/healthcheck", app.healthcheckHandler)
 	router.GET("/v1/movie/:id", app.showMovieHandler)
 
-	err := router.Run()
+	err := router.Run(":" + strconv.Itoa(app.config.port))
 	logger.Error(err.Error())
 	os.Exit(1)
 }
