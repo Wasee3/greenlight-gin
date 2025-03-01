@@ -63,13 +63,14 @@ func main() {
 
 	router.Use(gin.Recovery())
 	router.GET("/v1/healthcheck", app.healthcheckHandler)
-	router.GET("/v1/movie/:id", app.showMovieHandler)
-	router.POST("/v1/movie", app.createMovieHandler)
+	router.GET("/v1/movie/:id", app.ShowMovieHandler)
+	router.POST("/v1/movie", app.CreateMovieHandler)
+	router.PUT("/v1/movie/:id", app.UpdateMovieHandler)
 
 	err = router.Run(":" + strconv.Itoa(app.config.port))
 
 	if err != nil {
-		logger.Error("Cannot start the gin Router", err)
+		logger.Error("Cannot start the gin Router")
 	}
 
 	os.Exit(1)

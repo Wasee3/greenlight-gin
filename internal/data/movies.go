@@ -9,6 +9,13 @@ import (
 	"gorm.io/gorm"
 )
 
+type Update struct {
+	Title   string         `json:"title" binding:"omitempty"`
+	Year    int32          `json:"year" binding:"omitempty,gte=1999"`
+	Runtime int32          `json:"runtime" binding:"omitempty"`
+	Genres  pq.StringArray `json:"genres" binding:"omitempty"`
+}
+
 type Input struct {
 	ID        int64     `json:"id" binding:"required"`
 	CreatedAt time.Time `json:"-"`
@@ -60,7 +67,15 @@ func (m MovieModel) Get(c *gin.Context, id int64) (*Movies, error) {
 }
 
 // Add a placeholder method for updating a specific record in the movies table.
-func (m MovieModel) Update(movie *Movies) error {
+func (m MovieModel) Update(c *gin.Context, movie *Movies) error {
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	err := m.db.WithContext(ctx).Save(&movie).Error
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
