@@ -17,7 +17,7 @@ func (app *application) showMovieHandler(c *gin.Context) {
 		return
 	}
 
-	movie := data.Movie{
+	movie := data.Movies{
 		ID:        123,
 		CreatedAt: time.Now(),
 		Title:     "Casablanca",
@@ -45,6 +45,7 @@ func (app *application) createMovieHandler(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1048576)
 
 	var input struct {
+		ID      int64    `json:"id" binding:"required"`
 		Title   string   `json:"title" binding:"required"`
 		Year    int32    `json:"year" binding:"required,gte=1999"`
 		Runtime int32    `json:"runtime" binding:"required"`
@@ -53,6 +54,24 @@ func (app *application) createMovieHandler(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	movie := &data.Movies{
+		ID:        input.ID,
+		CreatedAt: time.Now(),
+		Title:     input.Title,
+		Year:      input.Year,
+		Runtime:   input.Runtime,
+		Genres:    input.Genres,
+		Version:   1,
+	}
+
+	err := app.models.Movies.Insert(c, movie)
+
+	if err != nil {
+		app.logger.Error("Failed to insert movie", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err})
 		return
 	}
 
