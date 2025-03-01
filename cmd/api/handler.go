@@ -1,12 +1,16 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/Wasee3/greenlight-gin/internal/data"
 	"github.com/gin-gonic/gin"
+	"github.com/jinzhu/copier"
+	"gorm.io/gorm"
 )
 
 func (app *application) showMovieHandler(c *gin.Context) {
@@ -17,40 +21,49 @@ func (app *application) showMovieHandler(c *gin.Context) {
 		return
 	}
 
-	movie := data.Movies{
-		ID:        123,
-		CreatedAt: time.Now(),
-		Title:     "Casablanca",
-		Runtime:   102,
-		Genres:    []string{"drama", "romance", "war"},
-		Version:   1,
-	}
-	// Encode the struct to JSON and send it as the HTTP response.
-
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id parameter"})
 		return
 	}
 
-	if id == movie.ID {
-		c.JSON(http.StatusOK, movie)
-	} else {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+	var movie *data.Movies
+	movie, err = app.models.Movies.Get(c, id)
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) { // Handle "not found" error specifically
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Movie with ID %d not found", id)})
+		} else {
+			app.logger.Error("Database error", "error", err) // Log unexpected errors
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		}
+		return
 	}
+
+	var input data.Input
+	err = copier.Copy(&input, &movie)
+	if err != nil {
+		app.logger.Error("Copier error", "error:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error by Copier"})
+		return
+	}
+	c.JSON(http.StatusOK, input)
+
 }
 
 func (app *application) createMovieHandler(c *gin.Context) {
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1048576)
 
-	var input struct {
-		ID      int64    `json:"id" binding:"required"`
-		Title   string   `json:"title" binding:"required"`
-		Year    int32    `json:"year" binding:"required,gte=1999"`
-		Runtime int32    `json:"runtime" binding:"required"`
-		Genres  []string `json:"genres" binding:"required"`
-	}
+	// var input struct {
+	// 	ID      int64    `json:"id" binding:"required"`
+	// 	Title   string   `json:"title" binding:"required"`
+	// 	Year    int32    `json:"year" binding:"required,gte=1999"`
+	// 	Runtime int32    `json:"runtime" binding:"required"`
+	// 	Genres  []string `json:"genres" binding:"required"`
+	// }
+
+	var input data.Input
 
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
