@@ -2,6 +2,8 @@ package data
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -66,17 +68,73 @@ func (m MovieModel) Get(c *gin.Context, id int64) (*Movies, error) {
 	return &movie, nil
 }
 
-// Add a placeholder method for updating a specific record in the movies table.
-func (m MovieModel) Update(c *gin.Context, movie *Movies) error {
-
+func (m *MovieModel) UpdateMovieInTransaction(c *gin.Context, id int64, update Update) (*Movies, error) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	err := m.db.WithContext(ctx).Save(&movie).Error
+	var updatedMovie Movies
+
+	// Start a transaction
+	err := m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var movie Movies
+
+		// Retrieve movie record inside the transaction
+		if err := tx.Where("id = ?", id).First(&movie).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			return fmt.Errorf("db_error: %w", err) // Wrap other DB errors
+		}
+
+		// Apply updates
+		if update.Title != "" {
+			movie.Title = update.Title
+		}
+		if update.Year != 0 {
+			movie.Year = update.Year
+		}
+		if update.Runtime != 0 {
+			movie.Runtime = update.Runtime
+		}
+		if len(update.Genres) > 0 {
+			uniqueGenres := make(map[string]bool)
+			for _, genre := range movie.Genres {
+				uniqueGenres[genre] = true
+			}
+			for _, genre := range update.Genres {
+				if !uniqueGenres[genre] {
+					movie.Genres = append(movie.Genres, genre)
+					uniqueGenres[genre] = true
+				}
+			}
+		}
+
+		// Optimistic locking: Ensure the version matches before updating
+		prevVersion := movie.Version
+		movie.Version++
+
+		result := tx.Model(&movie).
+			Where("id = ? AND version = ?", movie.ID, prevVersion).
+			Updates(&movie)
+
+		if result.Error != nil {
+			return fmt.Errorf("db_error: %w", result.Error)
+		}
+
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("concurrent_update: Movie was modified by another request")
+		}
+
+		// Store the updated movie for return
+		updatedMovie = movie
+		return nil // Commit transaction
+	})
+
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+
+	return &updatedMovie, nil
 }
 
 // Add a placeholder method for deleting a specific record from the movies table.
