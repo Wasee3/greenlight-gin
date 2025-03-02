@@ -157,3 +157,23 @@ func (app *application) DeleteMovieHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"Message": fmt.Sprintf("Movie with ID %d deleted", id)})
 }
+
+func (app *application) ListMovieHandler(c *gin.Context) {
+
+	movies, err := app.models.Movies.List(c)
+
+	if err != nil {
+		app.logger.Error("Unable to list movie", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err})
+		return
+	}
+
+	var input []data.Input
+	err = copier.Copy(&input, &movies)
+	if err != nil {
+		app.logger.Error("Copier error", "error:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error by Copier"})
+		return
+	}
+	c.JSON(http.StatusOK, input)
+}

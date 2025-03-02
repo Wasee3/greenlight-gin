@@ -13,7 +13,7 @@ import (
 
 type Update struct {
 	Title   string         `json:"title" binding:"omitempty"`
-	Year    int32          `json:"year" binding:"omitempty,gte=1999"`
+	Year    int32          `json:"year" binding:"omitempty,gte=1947"`
 	Runtime int32          `json:"runtime" binding:"omitempty"`
 	Genres  pq.StringArray `json:"genres" binding:"omitempty"`
 }
@@ -22,7 +22,7 @@ type Input struct {
 	ID        int64     `json:"id" binding:"required"`
 	CreatedAt time.Time `json:"-"`
 	Title     string    `json:"title" binding:"required"`
-	Year      int32     `json:"year" binding:"required,gte=1999"`
+	Year      int32     `json:"year" binding:"required,gte=1947"`
 	Runtime   int32     `json:"runtime" binding:"required"`
 	Genres    []string  `json:"genres" binding:"required"`
 	Version   int32     `json:"-"`
@@ -154,4 +154,17 @@ func (m MovieModel) Delete(c *gin.Context, id int64) error {
 	}
 
 	return nil
+}
+
+func (m MovieModel) List(c *gin.Context) (*[]Movies, error) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Second)
+	defer cancel()
+
+	var movies []Movies
+	err := m.db.WithContext(ctx).Find(&movies).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &movies, nil
 }
