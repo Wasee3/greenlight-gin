@@ -80,6 +80,20 @@ func (m MovieModel) Update(c *gin.Context, movie *Movies) error {
 }
 
 // Add a placeholder method for deleting a specific record from the movies table.
-func (m MovieModel) Delete(id int64) error {
+func (m MovieModel) Delete(c *gin.Context, id int64) error {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Second)
+	defer cancel()
+
+	// result := m.db.Debug().WithContext(ctx).Where("ID = ?", id).Delete(&Movies{}) // Prints Query
+	result := m.db.WithContext(ctx).Where("ID = ?", id).Delete(&Movies{})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound // Custom error if no rows were deleted
+	}
+
 	return nil
 }

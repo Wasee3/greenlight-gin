@@ -157,3 +157,32 @@ func (app *application) UpdateMovieHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"Updated": update})
 }
+
+func (app *application) DeleteMovieHandler(c *gin.Context) {
+	idStr := c.Params.ByName("id")
+
+	if idStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing id parameter"})
+		return
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id parameter"})
+		return
+	}
+
+	err = app.models.Movies.Delete(c, id)
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Movie with ID %d not found", id)})
+		} else {
+			app.logger.Error("Database error", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"Message": fmt.Sprintf("Movie with ID %d deleted", id)})
+}

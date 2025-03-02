@@ -66,6 +66,7 @@ func main() {
 	router.GET("/v1/movie/:id", app.ShowMovieHandler)
 	router.POST("/v1/movie", app.CreateMovieHandler)
 	router.PUT("/v1/movie/:id", app.UpdateMovieHandler)
+	router.DELETE("/v1/movie/:id", app.DeleteMovieHandler)
 
 	err = router.Run(":" + strconv.Itoa(app.config.port))
 
