@@ -11,6 +11,14 @@ import (
 	"gorm.io/gorm"
 )
 
+type Filters struct {
+	Page     int    `form:"page" binding:"numeric,gte=1"`
+	PageSize int    `form:"pagesize" binding:"numeric,gte=1"`
+	Sort     string `form:"sort" binding:"alpha,oneof=id title year"`
+	Order    string `form:"order" binding:"alpha,oneof=asc desc"`
+	Pretty   bool   `form:"pretty" binding:"boolean"`
+}
+
 type Update struct {
 	Title   string         `json:"title" binding:"omitempty"`
 	Year    int32          `json:"year" binding:"omitempty,gte=1947"`
@@ -156,12 +164,14 @@ func (m MovieModel) Delete(c *gin.Context, id int64) error {
 	return nil
 }
 
-func (m MovieModel) List(c *gin.Context) (*[]Movies, error) {
+func (m MovieModel) List(c *gin.Context, filter *Filters) (*[]Movies, error) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Second)
 	defer cancel()
 
+	offset := (filter.Page - 1) * filter.PageSize
+
 	var movies []Movies
-	err := m.db.WithContext(ctx).Find(&movies).Error
+	err := m.db.WithContext(ctx).Order(filter.Sort + " " + filter.Order).Limit(filter.PageSize).Offset(offset).Find(&movies).Error
 	if err != nil {
 		return nil, err
 	}

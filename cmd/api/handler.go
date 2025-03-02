@@ -159,12 +159,25 @@ func (app *application) DeleteMovieHandler(c *gin.Context) {
 }
 
 func (app *application) ListMovieHandler(c *gin.Context) {
+	filter := &data.Filters{
+		Page:     1,
+		PageSize: 2,
+		Sort:     "id",
+		Order:    "asc",
+		Pretty:   false,
+	}
 
-	movies, err := app.models.Movies.List(c)
+	fmt.Println(filter.Page, filter.PageSize, filter.Pretty, filter.Sort, filter.Order)
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	movies, err := app.models.Movies.List(c, filter)
 
 	if err != nil {
 		app.logger.Error("Unable to list movie", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -172,8 +185,14 @@ func (app *application) ListMovieHandler(c *gin.Context) {
 	err = copier.Copy(&input, &movies)
 	if err != nil {
 		app.logger.Error("Copier error", "error:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error by Copier"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, input)
+
+	if filter.Pretty {
+		c.IndentedJSON(http.StatusOK, input)
+	} else {
+		c.JSON(http.StatusOK, input)
+	}
+
 }
