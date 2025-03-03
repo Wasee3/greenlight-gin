@@ -17,6 +17,7 @@ type Filters struct {
 	Sort     string `form:"sort" binding:"alpha,oneof=id title year"`
 	Order    string `form:"order" binding:"alpha,oneof=asc desc"`
 	Pretty   bool   `form:"pretty" binding:"boolean"`
+	Title    string `form:"title" binding:"omitempty"`
 }
 
 type Update struct {
@@ -172,6 +173,22 @@ func (m MovieModel) List(c *gin.Context, filter *Filters) (*[]Movies, error) {
 
 	var movies []Movies
 	err := m.db.WithContext(ctx).Order(filter.Sort + " " + filter.Order).Limit(filter.PageSize).Offset(offset).Find(&movies).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &movies, nil
+}
+
+func (m MovieModel) Search(c *gin.Context, filter *Filters) (*[]Movies, error) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Second)
+	defer cancel()
+
+	var movies []Movies
+	err := m.db.WithContext(ctx).Raw(`
+	SELECT * FROM movies WHERE to_tsvector('english', title) @@ plainto_tsquery(?) 
+	ORDER BY ts_rank_cd(to_tsvector('english', title), plainto_tsquery(?)) DESC`, filter.Title, filter.Title).
+		Scan(&movies).Error
 	if err != nil {
 		return nil, err
 	}

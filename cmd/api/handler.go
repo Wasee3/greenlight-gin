@@ -164,16 +164,25 @@ func (app *application) ListMovieHandler(c *gin.Context) {
 		PageSize: 2,
 		Sort:     "id",
 		Order:    "asc",
+		Title:    "",
 		Pretty:   false,
 	}
 
-	fmt.Println(filter.Page, filter.PageSize, filter.Pretty, filter.Sort, filter.Order)
 	if err := c.ShouldBindQuery(&filter); err != nil {
+		app.logger.Error("Invalid Query", "Error", err.Error())
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	movies, err := app.models.Movies.List(c, filter)
+	var movies *[]data.Movies
+	var err error
+
+	if filter.Title != "" {
+		filter.Pretty = true
+		movies, err = app.models.Movies.Search(c, filter)
+	} else {
+		movies, err = app.models.Movies.List(c, filter)
+	}
 
 	if err != nil {
 		app.logger.Error("Unable to list movie", "error", err)
@@ -194,5 +203,4 @@ func (app *application) ListMovieHandler(c *gin.Context) {
 	} else {
 		c.JSON(http.StatusOK, input)
 	}
-
 }
