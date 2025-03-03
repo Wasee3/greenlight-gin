@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -176,12 +177,28 @@ func (app *application) ListMovieHandler(c *gin.Context) {
 
 	var movies *[]data.Movies
 	var err error
+	var tr int64
+	var metadata *data.Metadata
 
 	if filter.Title != "" {
 		filter.Pretty = true
-		movies, err = app.models.Movies.Search(c, filter)
+		movies, tr, err = app.models.Movies.Search(c, filter)
+		metadata = &data.Metadata{
+			CurrentPage:  filter.Page,
+			PageSize:     filter.PageSize,
+			FirstPage:    1,
+			LastPage:     int(math.Ceil(float64(tr) / float64(filter.PageSize))),
+			TotalRecords: int64(tr),
+		}
 	} else {
 		movies, err = app.models.Movies.List(c, filter)
+		metadata = &data.Metadata{
+			CurrentPage:  filter.Page,
+			PageSize:     filter.PageSize,
+			FirstPage:    1,
+			LastPage:     int(math.Ceil(float64(tr) / float64(filter.PageSize))),
+			TotalRecords: int64(totalMoviesCount),
+		}
 	}
 
 	if err != nil {
@@ -199,8 +216,8 @@ func (app *application) ListMovieHandler(c *gin.Context) {
 	}
 
 	if filter.Pretty {
-		c.IndentedJSON(http.StatusOK, input)
+		c.IndentedJSON(http.StatusOK, gin.H{"Metadata": metadata, "movies": input})
 	} else {
-		c.JSON(http.StatusOK, input)
+		c.JSON(http.StatusOK, gin.H{"Metadata": metadata, "movies": input})
 	}
 }

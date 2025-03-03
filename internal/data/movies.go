@@ -11,6 +11,14 @@ import (
 	"gorm.io/gorm"
 )
 
+type Metadata struct {
+	CurrentPage  int   `json:"current_page"`
+	PageSize     int   `json:"page_size"`
+	FirstPage    int   `json:"first_page"`
+	LastPage     int   `json:"last_page"`
+	TotalRecords int64 `json:"total_records"`
+}
+
 type Filters struct {
 	Page     int    `form:"page" binding:"numeric,gte=1"`
 	PageSize int    `form:"pagesize" binding:"numeric,gte=1"`
@@ -180,18 +188,23 @@ func (m MovieModel) List(c *gin.Context, filter *Filters) (*[]Movies, error) {
 	return &movies, nil
 }
 
-func (m MovieModel) Search(c *gin.Context, filter *Filters) (*[]Movies, error) {
+func (m MovieModel) Search(c *gin.Context, filter *Filters) (*[]Movies, int64, error) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 100*time.Second)
 	defer cancel()
 
 	var movies []Movies
+	var totalRecords int64
 	err := m.db.WithContext(ctx).Raw(`
 	SELECT * FROM movies WHERE to_tsvector('english', title) @@ plainto_tsquery(?) 
 	ORDER BY ts_rank_cd(to_tsvector('english', title), plainto_tsquery(?)) DESC`, filter.Title, filter.Title).
 		Scan(&movies).Error
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return &movies, nil
+	if len(movies) > 0 {
+		totalRecords = int64(len(movies))
+	}
+
+	return &movies, totalRecords, nil
 }

@@ -51,6 +51,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	go UpdateMovieCount(db)
 	logger.Info("database connection pool established")
 
 	app := &application{
