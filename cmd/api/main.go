@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wasee3/greenlight-gin/internal/data"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 )
 
 const version = "1.0.0"
@@ -25,14 +26,17 @@ type config struct {
 }
 
 type application struct {
-	config config
-	logger *slog.Logger
-	models data.Models
+	config  config
+	logger  *slog.Logger
+	models  data.Models
+	limiter *LimiterStore
 }
 
 func main() {
 
 	var cfg config
+	var rps float64
+	var burst int
 
 	flag.IntVar(&cfg.port, "port", 20000, "API server port")
 	flag.StringVar(&cfg.env, "env", "development", "Environment (development|staging|production)")
@@ -40,8 +44,13 @@ func main() {
 	flag.IntVar(&cfg.db.maxOpenConns, "db-max-open-conns", 25, "PostgreSQL max open connections")
 	flag.IntVar(&cfg.db.maxIdleConns, "db-max-idle-conns", 25, "PostgreSQL max idle connections")
 	flag.DurationVar(&cfg.db.maxIdleTime, "db-max-idle-time", 15*time.Minute, "PostgreSQL max connection idle time")
+	flag.Float64Var(&rps, "limiter-rps", 2, "Rate limiter maximum requests per second")
+	flag.IntVar(&burst, "limiter-burst", 4, "Rate limiter maximum burst")
+	// flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
 
 	flag.Parse()
+
+	ltr := NewLimiterStore(rate.Limit(rps), burst)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
@@ -55,14 +64,15 @@ func main() {
 	logger.Info("database connection pool established")
 
 	app := &application{
-		config: cfg,
-		logger: logger,
-		models: data.NewModels(db),
+		config:  cfg,
+		logger:  logger,
+		models:  data.NewModels(db),
+		limiter: ltr,
 	}
 
 	router := gin.Default()
 
-	router.Use(gin.Recovery())
+	router.Use(gin.Recovery(), app.RateLimiterMiddleware())
 	router.GET("/v1/healthcheck", app.healthcheckHandler)
 	router.GET("/v1/movie/:id", app.ShowMovieHandler)
 	router.POST("/v1/movie", app.CreateMovieHandler)
