@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Wasee3/greenlight-gin/internal/data"
-	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 )
 
@@ -70,15 +69,7 @@ func main() {
 		limiter: ltr,
 	}
 
-	router := gin.Default()
-
-	router.Use(gin.Recovery(), app.RateLimiterMiddleware())
-	router.GET("/v1/healthcheck", app.healthcheckHandler)
-	router.GET("/v1/movie/:id", app.ShowMovieHandler)
-	router.POST("/v1/movie", app.CreateMovieHandler)
-	router.GET("/v1/movie", app.ListMovieHandler)
-	router.PUT("/v1/movie/:id", app.UpdateMovieHandler)
-	router.DELETE("/v1/movie/:id", app.DeleteMovieHandler)
+	router := app.routes()
 
 	err = router.Run(":" + strconv.Itoa(app.config.port))
 
@@ -86,5 +77,5 @@ func main() {
 		logger.Error("Cannot start the gin Router")
 	}
 
-	os.Exit(1)
+	os.Exit(0)
 }
