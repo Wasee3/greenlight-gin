@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Nerzal/gocloak/v13"
 	"github.com/Wasee3/greenlight-gin/internal/data"
 	"github.com/gin-gonic/gin"
 	"github.com/jinzhu/copier"
@@ -220,4 +223,112 @@ func (app *application) ListMovieHandler(c *gin.Context) {
 	} else {
 		c.JSON(http.StatusOK, gin.H{"Metadata": metadata, "movies": input})
 	}
+}
+
+func (app *application) RegisterUserHandler(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1048576)
+
+	var user User
+	if err := c.ShouldBindJSON(&user); err != nil {
+		app.logger.Error("Invalid Input", "error", err)
+		c.JSON(http.StatusBadRequest,
+			gin.H{
+				"required_fields": gin.H{
+					"Username":   "Allowed chars: a-z, A-Z, 0-9, _ pr - min: 2, max: 20",
+					"Email":      "Valid Email, max: 40",
+					"Password":   "Allowed chars: a-z, A-Z, 0-9, _, -, @ min: 10, max: 20",
+					"First Name": "Allowed chars: a-z, A-Z, - min: 2, max: 20",
+					"Last Name":  "Allowed chars: a-z, A-Z, - min: 2, max: 20",
+				},
+				"error": err.Error(),
+			})
+		return
+	}
+
+	match, err := regexp.MatchString(`^[a-zA-Z0-9_]+$`, user.Username)
+	if !match {
+		app.logger.Error("Invalid Username", "error", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Username"})
+		return
+	}
+
+	match, err = regexp.MatchString(`^[a-zA-Z0-9_@]+$`, user.Password)
+	if !match {
+		app.logger.Error("Invalid Password", "error", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Password"})
+		return
+	}
+
+	match, err = regexp.MatchString(`^[a-zA-Z-]+$`, user.FirstName)
+	if !match {
+		app.logger.Error("Invalid First Name", "error", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid First Name"})
+		return
+	}
+
+	match, err = regexp.MatchString(`^[a-zA-Z-]+$`, user.LastName)
+	if !match {
+		app.logger.Error("Invalid Last Name", "error", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Last Name"})
+		return
+	}
+
+	keycloakURL := app.config.kc.AuthURL
+	realm := app.config.kc.Realm
+	admin_username := app.config.kc.admin_username
+	admin_password := app.config.kc.admin_password
+
+	client := gocloak.NewClient(keycloakURL)
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
+	defer cancel()
+
+	token, err := client.LoginAdmin(ctx, admin_username, admin_password, realm)
+	if err != nil {
+		app.logger.Error("Failed to login to Keycloak", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
+	users, err := client.GetUsers(ctx, token.AccessToken, realm, gocloak.GetUsersParams{
+		Username: &user.Username,
+		Max:      gocloak.IntP(1), // Get only 1 user
+	})
+	if err != nil {
+		app.logger.Error("Failed to search user in Keycloak", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
+	if len(users) > 0 {
+		app.logger.Warn("User Exists, Cannot create", "username", user.Username)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User already exists", "username": user.Username})
+		return
+	}
+
+	kcuser := gocloak.User{
+		Username:      gocloak.StringP(user.Username),
+		FirstName:     gocloak.StringP(user.FirstName),
+		LastName:      gocloak.StringP(user.LastName),
+		Email:         gocloak.StringP(user.Email),
+		Enabled:       gocloak.BoolP(true),
+		EmailVerified: gocloak.BoolP(true),
+		Credentials: &[]gocloak.CredentialRepresentation{
+			{
+				Type:      gocloak.StringP("password"),
+				Value:     gocloak.StringP(user.Password),
+				Temporary: gocloak.BoolP(false),
+			},
+		},
+	}
+
+	_, err = client.CreateUser(ctx, token.AccessToken, realm, kcuser)
+	if err != nil {
+		app.logger.Error("Failed to create user in Keycloak", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, gin.H{"message": "Data received successfully", "data": user})
+
 }
