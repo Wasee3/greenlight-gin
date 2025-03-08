@@ -357,3 +357,27 @@ func (app *application) LoginUserHandler(c *gin.Context) {
 
 	c.IndentedJSON(http.StatusOK, gin.H{"access_token": token.AccessToken, "refresh_token": token.RefreshToken, "expires_in": token.ExpiresIn, "token_type": token.TokenType})
 }
+
+func (app *application) RefreshTokenHandler(c *gin.Context) {
+	var reftknreq RefreshTokenRequest
+
+	if err := c.ShouldBindJSON(&reftknreq); err != nil {
+		app.logger.Error("Invalid Input", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	client := gocloak.NewClient(app.config.kc.AuthURL)
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
+	defer cancel()
+
+	token, err := client.RefreshToken(ctx, reftknreq.RefreshToken, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm)
+	if err != nil {
+		app.logger.Error("Failed to refresh token", "error", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, gin.H{"access_token": token.AccessToken, "refresh_token": token.RefreshToken, "expires_in": token.ExpiresIn, "token_type": token.TokenType})
+}

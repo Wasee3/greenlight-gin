@@ -17,6 +17,7 @@ func (app *application) routes() *gin.Engine {
 	router.DELETE("/v1/movie/:id", app.DeleteMovieHandler)
 	router.POST("/v1/user/register", app.RegisterUserHandler)
 	router.POST("/v1/user/login", app.LoginUserHandler)
+	router.POST("/v1/user/token/refresh", app.RefreshTokenHandler)
 
 	return router
 }
