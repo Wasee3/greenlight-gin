@@ -7,3 +7,8 @@ type User struct {
 	FirstName string `json:"first_name" binding:"required,min=2,max=20"`
 	LastName  string `json:"last_name" binding:"required,min=2,max=20"`
 }
+
+type LoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}

@@ -332,3 +332,28 @@ func (app *application) RegisterUserHandler(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, gin.H{"message": "Data received successfully", "data": user})
 
 }
+
+func (app *application) LoginUserHandler(c *gin.Context) {
+	var req LoginRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		app.logger.Error("Invalid Input", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	client := gocloak.NewClient(app.config.kc.AuthURL)
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
+	defer cancel()
+
+	token, err := client.Login(ctx, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm, req.Username, req.Password)
+
+	if err != nil {
+		app.logger.Error("Failed to login to Keycloak", "error", err, "username", req.Username, "realm", app.config.kc.Realm, "client_id", app.config.kc.client_id)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, gin.H{"access_token": token.AccessToken, "refresh_token": token.RefreshToken, "expires_in": token.ExpiresIn, "token_type": token.TokenType})
+}
