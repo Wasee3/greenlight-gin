@@ -381,3 +381,45 @@ func (app *application) RefreshTokenHandler(c *gin.Context) {
 
 	c.IndentedJSON(http.StatusOK, gin.H{"access_token": token.AccessToken, "refresh_token": token.RefreshToken, "expires_in": token.ExpiresIn, "token_type": token.TokenType})
 }
+
+func (app *application) PasswordResetHandler(c *gin.Context) {
+	var req PasswordChangeRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		app.logger.Error("Invalid Input", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	client := gocloak.NewClient(app.config.kc.AuthURL)
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
+	defer cancel()
+
+	adminToken, err := client.LoginAdmin(ctx, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Failed to authenticate with Keycloak"})
+		return
+	}
+
+	users, err := client.GetUsers(ctx, adminToken.AccessToken, app.config.kc.Realm, gocloak.GetUsersParams{Username: &req.Username})
+	if err != nil || len(users) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	User_UUID := *users[0].ID
+
+	ExecActionEmail := gocloak.ExecuteActionsEmail{
+		UserID:   &User_UUID,
+		ClientID: &app.config.kc.client_id,
+		Actions:  &[]string{"UPDATE_PASSWORD"},
+	}
+	err = client.ExecuteActionsEmail(ctx, adminToken.AccessToken, app.config.kc.Realm, ExecActionEmail)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send password reset email"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Password reset email sent successfully"})
+}

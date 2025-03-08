@@ -16,3 +16,7 @@ type LoginRequest struct {
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
+
+type PasswordChangeRequest struct {
+	Username string `json:"username" binding:"required"`
+}
