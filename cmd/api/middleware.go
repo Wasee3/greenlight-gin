@@ -2,11 +2,14 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt"
 	"golang.org/x/time/rate"
 )
 
@@ -21,53 +24,6 @@ type LimiterStore struct {
 	mu      sync.Mutex
 	r       rate.Limit
 	b       int
-}
-
-// NewLimiterStore initializes the store
-func NewLimiterStore(r rate.Limit, b int) *LimiterStore {
-	store := &LimiterStore{
-		clients: make(map[string]*ClientLimiter),
-		r:       r,
-		b:       b,
-	}
-
-	// Start a cleanup routine to remove inactive clients
-	go store.cleanupStaleClients()
-
-	return store
-}
-
-func (s *LimiterStore) GetLimiter(ip string) *rate.Limiter {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// If client exists, update LastSeen time
-	if client, exists := s.clients[ip]; exists {
-		client.LastSeen = time.Now()
-		return client.Limiter
-	}
-
-	// Create a new limiter for a new IP
-	limiter := rate.NewLimiter(s.r, s.b)
-	s.clients[ip] = &ClientLimiter{
-		Limiter:  limiter,
-		LastSeen: time.Now(),
-	}
-
-	return limiter
-}
-
-func (s *LimiterStore) cleanupStaleClients() {
-	for {
-		time.Sleep(10 * time.Minute) // Run cleanup every 10 minutes
-		s.mu.Lock()
-		for ip, client := range s.clients {
-			if time.Since(client.LastSeen) > 15*time.Minute { // Remove if inactive for 15 min
-				delete(s.clients, ip)
-			}
-		}
-		s.mu.Unlock()
-	}
 }
 
 var (
@@ -96,6 +52,77 @@ func (app *application) RateLimiterMiddleware() gin.HandlerFunc {
 		if !limiter.Allow() {
 			app.logger.Error("Client IP Middleware ", "error:", errors.New("too many requests"))
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests from your IP"})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// Middleware: Validate JWT and extract roles
+func (app *application) JWTAuthMiddleware(requiredRoles []string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			app.auditLog(c, "UNAUTHORIZED", "Missing Authorization header")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Missing Authorization header"})
+			return
+		}
+
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		keySet, err := app.fetchJWKs(c)
+		if err != nil {
+			app.auditLog(c, "ERROR", "Failed to fetch Keycloak JWKS")
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
+			return
+		}
+
+		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
+			key, _ := keySet.Get(0)
+			var rawKey any
+			if err := key.Raw(&rawKey); err != nil {
+				return nil, fmt.Errorf("failed to get raw key: %w", err)
+			}
+			return rawKey, nil
+		})
+		if err != nil || !token.Valid {
+			app.auditLog(c, "UNAUTHORIZED", "Invalid or expired token")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			return
+		}
+
+		// Extract roles from token
+		claims, _ := token.Claims.(jwt.MapClaims)
+		realmRoles := extractRoles(claims)
+
+		// Enforce RBAC
+		if !hasRequiredRole(realmRoles, requiredRoles) {
+			app.auditLog(c, "FORBIDDEN", "User lacks required role")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Access Denied"})
+			return
+		}
+
+		// Attach user info to context
+		c.Set("user", claims["preferred_username"])
+		app.auditLog(c, "ACCESS_GRANTED", "User authorized")
+		c.Next()
+	}
+}
+
+// CORSMiddleware handles CORS and preflight requests
+func (app *application) CORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		origins := strings.Join(app.config.cors.trustedOrigins, ", ")
+		c.Writer.Header().Set("Access-Control-Allow-Origin", origins) // Allow all origins, change to specific domain in production
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Length, Authorization")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true") // Allow credentials (cookies, authorization headers)
+
+		// Handle Preflight (OPTIONS request)
+		if c.Request.Method == "OPTIONS" {
+			c.Writer.WriteHeader(http.StatusNoContent) // 204 No Content response
 			c.Abort()
 			return
 		}

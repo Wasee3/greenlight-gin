@@ -5,9 +5,11 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wasee3/greenlight-gin/internal/data"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
 
@@ -29,6 +31,11 @@ type config struct {
 		admin_password string
 		client_id      string
 		client_secret  string
+		kc_jwks_url    string
+		kc_issuer_url  string
+	}
+	cors struct {
+		trustedOrigins []string
 	}
 }
 
@@ -37,6 +44,7 @@ type application struct {
 	logger  *slog.Logger
 	models  data.Models
 	limiter *LimiterStore
+	audit   *logrus.Logger
 }
 
 func main() {
@@ -59,6 +67,16 @@ func main() {
 	flag.StringVar(&cfg.kc.admin_password, "admin-password", os.Getenv("KEYCLOAK_ADMIN_PASSWORD"), "Keycloak Admin Password")
 	flag.StringVar(&cfg.kc.client_id, "client-id", os.Getenv("KEYCLOAK_CLIENT_ID"), "Keycloak Client ID")
 	flag.StringVar(&cfg.kc.client_secret, "client-secret", os.Getenv("KEYCLOAK_CLIENT_SECRET"), "Keycloak Client Secret")
+	flag.StringVar(&cfg.kc.kc_jwks_url, "jwks-url", os.Getenv("KEYCLOAK_JWKS_URL"), "Keycloak JWKS URL")
+	flag.StringVar(&cfg.kc.kc_issuer_url, "issuer-url", os.Getenv("KEYCLOAK_ISSUER_URL"), "Keycloak Issuer URL")
+	flag.Func("cors-trusted-origins", "Trusted CORS origins (space separated)", func(val string) error {
+		if val == "" {
+			cfg.cors.trustedOrigins = []string{"http://example.com", "https://example2.com"}
+			return nil
+		}
+		cfg.cors.trustedOrigins = strings.Fields(val)
+		return nil
+	})
 	// flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
 
 	flag.Parse()
@@ -76,11 +94,14 @@ func main() {
 	go UpdateMovieCount(db)
 	logger.Info("database connection pool established")
 
+	auditLogger := logrus.New()
+
 	app := &application{
 		config:  cfg,
 		logger:  logger,
 		models:  data.NewModels(db),
 		limiter: ltr,
+		audit:   auditLogger,
 	}
 
 	router := app.routes()
