@@ -33,9 +33,13 @@ func (app *application) ShowMovieHandler(c *gin.Context) {
 	}
 
 	var movie *data.Movies
+	start := time.Now()
 	movie, err = app.models.Movies.Get(c, id)
 
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryErrorsTotal.WithLabelValues("get_movie").Inc()
 		if errors.Is(err, gorm.ErrRecordNotFound) { // Handle "not found" error specifically
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Movie with ID %d not found", id)})
 		} else {
@@ -44,6 +48,8 @@ func (app *application) ShowMovieHandler(c *gin.Context) {
 		}
 		return
 	}
+	duration := time.Since(start).Seconds()
+	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
 
 	var input data.Input
 	err = copier.Copy(&input, &movie)
@@ -76,14 +82,19 @@ func (app *application) CreateMovieHandler(c *gin.Context) {
 		Genres:    input.Genres,
 		Version:   1,
 	}
-
+	start := time.Now()
 	err := app.models.Movies.Insert(c, movie)
 
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryErrorsTotal.WithLabelValues("insert_movie").Inc()
 		app.logger.Error("Failed to insert movie", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err})
 		return
 	}
+	duration := time.Since(start).Seconds()
+	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Data received successfully",
@@ -116,8 +127,12 @@ func (app *application) UpdateMovieHandler(c *gin.Context) {
 	}
 
 	// Update the movie inside a transaction
+	start := time.Now()
 	updatedMovie, err := app.models.Movies.UpdateMovieInTransaction(c, id, update)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryErrorsTotal.WithLabelValues("update_movie").Inc()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Movie with ID %d not found", id)})
 		} else if strings.HasPrefix(err.Error(), "concurrent_update:") {
@@ -128,6 +143,8 @@ func (app *application) UpdateMovieHandler(c *gin.Context) {
 		}
 		return
 	}
+	duration := time.Since(start).Seconds()
+	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
 
 	// Respond with the updated movie data
 	c.JSON(http.StatusOK, gin.H{"message": "Movie updated successfully", "movie": updatedMovie})
@@ -147,9 +164,13 @@ func (app *application) DeleteMovieHandler(c *gin.Context) {
 		return
 	}
 
+	start := time.Now()
 	err = app.models.Movies.Delete(c, id)
 
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryErrorsTotal.WithLabelValues("delete_movie").Inc()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Movie with ID %d not found", id)})
 		} else {
@@ -158,6 +179,8 @@ func (app *application) DeleteMovieHandler(c *gin.Context) {
 		}
 		return
 	}
+	duration := time.Since(start).Seconds()
+	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
 
 	c.JSON(http.StatusOK, gin.H{"Message": fmt.Sprintf("Movie with ID %d deleted", id)})
 }
@@ -183,6 +206,7 @@ func (app *application) ListMovieHandler(c *gin.Context) {
 	var tr int64
 	var metadata *data.Metadata
 
+	start := time.Now()
 	if filter.Title != "" {
 		filter.Pretty = true
 		movies, tr, err = app.models.Movies.Search(c, filter)
@@ -205,10 +229,15 @@ func (app *application) ListMovieHandler(c *gin.Context) {
 	}
 
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryErrorsTotal.WithLabelValues("list_movie").Inc()
 		app.logger.Error("Unable to list movie", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	duration := time.Since(start).Seconds()
+	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
 
 	var input []data.Input
 	err = copier.Copy(&input, &movies)
@@ -273,24 +302,22 @@ func (app *application) RegisterUserHandler(c *gin.Context) {
 		return
 	}
 
-	keycloakURL := app.config.kc.AuthURL
 	realm := app.config.kc.Realm
 	admin_username := app.config.kc.admin_username
 	admin_password := app.config.kc.admin_password
 
-	client := gocloak.NewClient(keycloakURL)
-
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
 	defer cancel()
 
-	token, err := client.LoginAdmin(ctx, admin_username, admin_password, realm)
+	// token, err := app.client.LoginAdmin(admin_username, admin_password, realm)
+	token, err := app.client.LoginAdmin(ctx, admin_username, admin_password, realm)
 	if err != nil {
 		app.logger.Error("Failed to login to Keycloak", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
-	users, err := client.GetUsers(ctx, token.AccessToken, realm, gocloak.GetUsersParams{
+	users, err := app.client.GetUsers(ctx, token.AccessToken, realm, gocloak.GetUsersParams{
 		Username: &user.Username,
 		Max:      gocloak.IntP(1), // Get only 1 user
 	})
@@ -322,11 +349,19 @@ func (app *application) RegisterUserHandler(c *gin.Context) {
 		},
 	}
 
-	_, err = client.CreateUser(ctx, token.AccessToken, realm, kcuser)
+	start := time.Now()
+	_, err = app.client.CreateUser(ctx, token.AccessToken, realm, kcuser)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryErrorsTotal.WithLabelValues("create_user").Inc()
 		app.logger.Error("Failed to create user in Keycloak", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
+	} else {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		UserRegistrationsTotal.WithLabelValues("success").Inc()
 	}
 
 	c.IndentedJSON(http.StatusOK, gin.H{"message": "Data received successfully", "data": user})
@@ -339,23 +374,30 @@ func (app *application) LoginUserHandler(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		app.logger.Error("Invalid Input", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		FailedLoginsTotal.WithLabelValues("invalid_userpass").Inc()
 		return
 	}
-
-	client := gocloak.NewClient(app.config.kc.AuthURL)
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
 	defer cancel()
 
-	token, err := client.Login(ctx, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm, req.Username, req.Password)
+	start := time.Now()
+	token, err := app.client.Login(ctx, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm, req.Username, req.Password)
 
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryErrorsTotal.WithLabelValues("login").Inc()
 		app.logger.Error("Failed to login to Keycloak", "error", err, "username", req.Username, "realm", app.config.kc.Realm, "client_id", app.config.kc.client_id)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		FailedLoginsTotal.WithLabelValues("kc_invalid_password").Inc()
 		return
 	}
+	duration := time.Since(start).Seconds()
+	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
 
 	c.IndentedJSON(http.StatusOK, gin.H{"access_token": token.AccessToken, "refresh_token": token.RefreshToken, "expires_in": token.ExpiresIn, "token_type": token.TokenType})
+	LoginsTotal.WithLabelValues("login").Inc()
 }
 
 func (app *application) RefreshTokenHandler(c *gin.Context) {
@@ -367,18 +409,22 @@ func (app *application) RefreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	client := gocloak.NewClient(app.config.kc.AuthURL)
-
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
 	defer cancel()
 
-	token, err := client.RefreshToken(ctx, reftknreq.RefreshToken, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm)
+	start := time.Now()
+	token, err := app.client.RefreshToken(ctx, reftknreq.RefreshToken, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryErrorsTotal.WithLabelValues("refresh_token").Inc()
 		app.logger.Error("Failed to refresh token", "error", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
 		return
 	}
 
+	duration := time.Since(start).Seconds()
+	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
 	c.IndentedJSON(http.StatusOK, gin.H{"access_token": token.AccessToken, "refresh_token": token.RefreshToken, "expires_in": token.ExpiresIn, "token_type": token.TokenType})
 }
 
@@ -391,22 +437,31 @@ func (app *application) PasswordResetHandler(c *gin.Context) {
 		return
 	}
 
-	client := gocloak.NewClient(app.config.kc.AuthURL)
-
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
 	defer cancel()
 
-	adminToken, err := client.LoginAdmin(ctx, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm)
+	start := time.Now()
+	adminToken, err := app.client.LoginAdmin(ctx, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryErrorsTotal.WithLabelValues("login_admin").Inc()
+		app.logger.Error("Failed to login to Keycloak", "error", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Failed to authenticate with Keycloak"})
 		return
 	}
 
-	users, err := client.GetUsers(ctx, adminToken.AccessToken, app.config.kc.Realm, gocloak.GetUsersParams{Username: &req.Username})
+	users, err := app.client.GetUsers(ctx, adminToken.AccessToken, app.config.kc.Realm, gocloak.GetUsersParams{Username: &req.Username})
 	if err != nil || len(users) == 0 {
+		duration := time.Since(start).Seconds()
+		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryErrorsTotal.WithLabelValues("get_user").Inc()
+		app.logger.Error("Failed to get user from Keycloak", "error", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
+	duration := time.Since(start).Seconds()
+	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
 
 	User_UUID := *users[0].ID
 
@@ -415,8 +470,10 @@ func (app *application) PasswordResetHandler(c *gin.Context) {
 		ClientID: &app.config.kc.client_id,
 		Actions:  &[]string{"UPDATE_PASSWORD"},
 	}
-	err = client.ExecuteActionsEmail(ctx, adminToken.AccessToken, app.config.kc.Realm, ExecActionEmail)
+	err = app.client.ExecuteActionsEmail(ctx, adminToken.AccessToken, app.config.kc.Realm, ExecActionEmail)
 	if err != nil {
+		app.logger.Error("Failed to send password reset email", "error", err)
+		FailedLoginsTotal.WithLabelValues("kc_password_reset").Inc()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send password reset email"})
 		return
 	}

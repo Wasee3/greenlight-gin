@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -128,5 +129,27 @@ func (app *application) CORSMiddleware() gin.HandlerFunc {
 		}
 
 		c.Next()
+	}
+}
+
+func (app *application) PrometheusMiddleware(c *gin.Context) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+
+		// Process request
+		c.Next()
+
+		// Record metrics
+		duration := time.Since(start).Seconds()
+		statusCode := c.Writer.Status()
+
+		HttpRequestsTotal.WithLabelValues(c.Request.Method, c.FullPath(), strconv.Itoa(statusCode)).Inc()
+		HttpRequestDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		HttpRequestSize.WithLabelValues(c.Request.Method, c.FullPath()).Observe(float64(c.Request.ContentLength))
+		HttpResponseSize.WithLabelValues(c.Request.Method, c.FullPath()).Observe(float64(c.Writer.Size()))
+		if statusCode >= 400 {
+			HttpRequestsErrorsTotal.WithLabelValues(c.Request.Method, c.FullPath(), strconv.Itoa(statusCode)).Inc()
+		}
+
 	}
 }

@@ -4,13 +4,17 @@ import (
 	"flag"
 	"log/slog"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Nerzal/gocloak/v13"
 	"github.com/Wasee3/greenlight-gin/internal/data"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
+	"gorm.io/gorm"
 )
 
 const version = "1.0.0"
@@ -45,6 +49,41 @@ type application struct {
 	models  data.Models
 	limiter *LimiterStore
 	audit   *logrus.Logger
+	client  *gocloak.GoCloak
+}
+
+func init() {
+	// Register metrics with Prometheus
+	prometheus.MustRegister(
+		HttpRequestsTotal,
+		HttpRequestDuration,
+		HttpRequestSize,
+		HttpResponseSize,
+		HttpRequestsErrorsTotal,
+		DbQueryErrorsTotal,
+		PanicRecoveryTotal,
+		DbQueryDuration,
+		DbConnectionsActive,
+		UserRegistrationsTotal,
+		LoginsTotal,
+		FailedLoginsTotal,
+		GoGoroutines,
+		GoMemAllocBytes,
+		GoMemHeapObjects,
+	)
+
+	go func() {
+		for {
+			var memStats runtime.MemStats
+			runtime.ReadMemStats(&memStats)
+
+			GoGoroutines.Set(float64(runtime.NumGoroutine()))
+			GoMemAllocBytes.Set(float64(memStats.Alloc))
+			GoMemHeapObjects.Set(float64(memStats.HeapObjects))
+
+			time.Sleep(10 * time.Second) // Adjust the interval as needed
+		}
+	}()
 }
 
 func main() {
@@ -94,7 +133,26 @@ func main() {
 	go UpdateMovieCount(db)
 	logger.Info("database connection pool established")
 
+	go func(db *gorm.DB) {
+		sqlDB, _ := db.DB()
+		for {
+			var memStats runtime.MemStats
+			runtime.ReadMemStats(&memStats)
+
+			GoGoroutines.Set(float64(runtime.NumGoroutine()))
+			GoMemAllocBytes.Set(float64(memStats.Alloc))
+			GoMemHeapObjects.Set(float64(memStats.HeapObjects))
+
+			// Get active DB connections
+			DbConnectionsActive.WithLabelValues("postgres").Set(float64(sqlDB.Stats().OpenConnections))
+
+			time.Sleep(10 * time.Second) // Adjust the interval as needed
+		}
+	}(db)
+
 	auditLogger := logrus.New()
+
+	client := gocloak.NewClient(cfg.kc.AuthURL)
 
 	app := &application{
 		config:  cfg,
@@ -102,6 +160,7 @@ func main() {
 		models:  data.NewModels(db),
 		limiter: ltr,
 		audit:   auditLogger,
+		client:  client,
 	}
 
 	router := app.routes()
