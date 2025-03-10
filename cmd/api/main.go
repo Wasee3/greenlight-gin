@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"log"
 	"log/slog"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+
+	"os/signal"
 
 	"github.com/Nerzal/gocloak/v13"
 	"github.com/Wasee3/greenlight-gin/internal/data"
@@ -52,9 +57,11 @@ type application struct {
 	client  *gocloak.GoCloak
 }
 
-func init() {
-	// Register metrics with Prometheus
-	prometheus.MustRegister(
+func registerMetrics() {
+	// Register Prometheus metrics only once
+	reg := prometheus.DefaultRegisterer
+
+	metrics := []prometheus.Collector{
 		HttpRequestsTotal,
 		HttpRequestDuration,
 		HttpRequestSize,
@@ -63,31 +70,49 @@ func init() {
 		DbQueryErrorsTotal,
 		PanicRecoveryTotal,
 		DbQueryDuration,
-		DbConnectionsActive,
 		UserRegistrationsTotal,
 		LoginsTotal,
 		FailedLoginsTotal,
-		GoGoroutines,
-		GoMemAllocBytes,
-		GoMemHeapObjects,
-	)
+	}
 
+	for _, metric := range metrics {
+		if err := reg.Register(metric); err != nil {
+			log.Println("Metric already registered, skipping:", err)
+		}
+	}
+}
+
+func startMonitoring(ctx context.Context, db *gorm.DB) {
 	go func() {
+		sqlDB, _ := db.DB()
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
 		for {
-			var memStats runtime.MemStats
-			runtime.ReadMemStats(&memStats)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				var memStats runtime.MemStats
+				runtime.ReadMemStats(&memStats)
 
-			GoGoroutines.Set(float64(runtime.NumGoroutine()))
-			GoMemAllocBytes.Set(float64(memStats.Alloc))
-			GoMemHeapObjects.Set(float64(memStats.HeapObjects))
+				// Ensure metrics exist before updating them
+				if prometheus.DefaultGatherer != nil {
+					GoGoroutines.Set(float64(runtime.NumGoroutine()))
+					GoMemAllocBytes.Set(float64(memStats.Alloc))
+					GoMemHeapObjects.Set(float64(memStats.HeapObjects))
+				}
 
-			time.Sleep(10 * time.Second) // Adjust the interval as needed
+				// Update active DB connections
+				if prometheus.DefaultGatherer != nil {
+					DbConnectionsActive.WithLabelValues("postgres").Set(float64(sqlDB.Stats().OpenConnections))
+				}
+			}
 		}
 	}()
 }
 
 func main() {
-
 	var cfg config
 	var rps float64
 	var burst int
@@ -116,9 +141,15 @@ func main() {
 		cfg.cors.trustedOrigins = strings.Fields(val)
 		return nil
 	})
-	// flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
 
 	flag.Parse()
+
+	// Graceful shutdown context
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Register Prometheus metrics
+	registerMetrics()
 
 	ltr := NewLimiterStore(rate.Limit(rps), burst)
 
@@ -133,25 +164,10 @@ func main() {
 	go UpdateMovieCount(db)
 	logger.Info("database connection pool established")
 
-	go func(db *gorm.DB) {
-		sqlDB, _ := db.DB()
-		for {
-			var memStats runtime.MemStats
-			runtime.ReadMemStats(&memStats)
-
-			GoGoroutines.Set(float64(runtime.NumGoroutine()))
-			GoMemAllocBytes.Set(float64(memStats.Alloc))
-			GoMemHeapObjects.Set(float64(memStats.HeapObjects))
-
-			// Get active DB connections
-			DbConnectionsActive.WithLabelValues("postgres").Set(float64(sqlDB.Stats().OpenConnections))
-
-			time.Sleep(10 * time.Second) // Adjust the interval as needed
-		}
-	}(db)
+	// Start monitoring goroutine with graceful shutdown support
+	startMonitoring(ctx, db)
 
 	auditLogger := logrus.New()
-
 	client := gocloak.NewClient(cfg.kc.AuthURL)
 
 	app := &application{
@@ -163,13 +179,20 @@ func main() {
 		client:  client,
 	}
 
+	// Handle shutdown signals
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+		<-sigChan
+		logger.Info("Shutting down gracefully...")
+		cancel() // Stop goroutines
+		os.Exit(0)
+	}()
+
 	router := app.routes()
 
-	err = router.Run(":" + strconv.Itoa(app.config.port))
-
-	if err != nil {
+	if err := router.Run(":" + strconv.Itoa(app.config.port)); err != nil {
 		logger.Error("Cannot start the gin Router")
 	}
-
-	os.Exit(0)
 }

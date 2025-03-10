@@ -38,7 +38,7 @@ func (app *application) ShowMovieHandler(c *gin.Context) {
 
 	if err != nil {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("get_movie").Observe(duration)
 		DbQueryErrorsTotal.WithLabelValues("get_movie").Inc()
 		if errors.Is(err, gorm.ErrRecordNotFound) { // Handle "not found" error specifically
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Movie with ID %d not found", id)})
@@ -49,7 +49,7 @@ func (app *application) ShowMovieHandler(c *gin.Context) {
 		return
 	}
 	duration := time.Since(start).Seconds()
-	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+	DbQueryDuration.WithLabelValues("get_movie").Observe(duration)
 
 	var input data.Input
 	err = copier.Copy(&input, &movie)
@@ -87,14 +87,14 @@ func (app *application) CreateMovieHandler(c *gin.Context) {
 
 	if err != nil {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("create_movie").Observe(duration)
 		DbQueryErrorsTotal.WithLabelValues("insert_movie").Inc()
 		app.logger.Error("Failed to insert movie", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err})
 		return
 	}
 	duration := time.Since(start).Seconds()
-	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+	DbQueryDuration.WithLabelValues("create_movie").Observe(duration)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Data received successfully",
@@ -131,7 +131,7 @@ func (app *application) UpdateMovieHandler(c *gin.Context) {
 	updatedMovie, err := app.models.Movies.UpdateMovieInTransaction(c, id, update)
 	if err != nil {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("update_movie").Observe(duration)
 		DbQueryErrorsTotal.WithLabelValues("update_movie").Inc()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Movie with ID %d not found", id)})
@@ -144,7 +144,7 @@ func (app *application) UpdateMovieHandler(c *gin.Context) {
 		return
 	}
 	duration := time.Since(start).Seconds()
-	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+	DbQueryDuration.WithLabelValues("update_movie").Observe(duration)
 
 	// Respond with the updated movie data
 	c.JSON(http.StatusOK, gin.H{"message": "Movie updated successfully", "movie": updatedMovie})
@@ -169,7 +169,7 @@ func (app *application) DeleteMovieHandler(c *gin.Context) {
 
 	if err != nil {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("delete_movie").Observe(duration)
 		DbQueryErrorsTotal.WithLabelValues("delete_movie").Inc()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Movie with ID %d not found", id)})
@@ -180,7 +180,7 @@ func (app *application) DeleteMovieHandler(c *gin.Context) {
 		return
 	}
 	duration := time.Since(start).Seconds()
-	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+	DbQueryDuration.WithLabelValues("delete_movie").Observe(duration)
 
 	c.JSON(http.StatusOK, gin.H{"Message": fmt.Sprintf("Movie with ID %d deleted", id)})
 }
@@ -230,14 +230,14 @@ func (app *application) ListMovieHandler(c *gin.Context) {
 
 	if err != nil {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("list_movie").Observe(duration)
 		DbQueryErrorsTotal.WithLabelValues("list_movie").Inc()
 		app.logger.Error("Unable to list movie", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	duration := time.Since(start).Seconds()
-	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+	DbQueryDuration.WithLabelValues("list_movie").Observe(duration)
 
 	var input []data.Input
 	err = copier.Copy(&input, &movies)
@@ -353,14 +353,14 @@ func (app *application) RegisterUserHandler(c *gin.Context) {
 	_, err = app.client.CreateUser(ctx, token.AccessToken, realm, kcuser)
 	if err != nil {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("create_user").Observe(duration)
 		DbQueryErrorsTotal.WithLabelValues("create_user").Inc()
 		app.logger.Error("Failed to create user in Keycloak", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	} else {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("create_user").Observe(duration)
 		UserRegistrationsTotal.WithLabelValues("success").Inc()
 	}
 
@@ -386,7 +386,7 @@ func (app *application) LoginUserHandler(c *gin.Context) {
 
 	if err != nil {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("login").Observe(duration)
 		DbQueryErrorsTotal.WithLabelValues("login").Inc()
 		app.logger.Error("Failed to login to Keycloak", "error", err, "username", req.Username, "realm", app.config.kc.Realm, "client_id", app.config.kc.client_id)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
@@ -394,7 +394,7 @@ func (app *application) LoginUserHandler(c *gin.Context) {
 		return
 	}
 	duration := time.Since(start).Seconds()
-	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+	DbQueryDuration.WithLabelValues("login").Observe(duration)
 
 	c.IndentedJSON(http.StatusOK, gin.H{"access_token": token.AccessToken, "refresh_token": token.RefreshToken, "expires_in": token.ExpiresIn, "token_type": token.TokenType})
 	LoginsTotal.WithLabelValues("login").Inc()
@@ -416,7 +416,7 @@ func (app *application) RefreshTokenHandler(c *gin.Context) {
 	token, err := app.client.RefreshToken(ctx, reftknreq.RefreshToken, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm)
 	if err != nil {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("refresh_token").Observe(duration)
 		DbQueryErrorsTotal.WithLabelValues("refresh_token").Inc()
 		app.logger.Error("Failed to refresh token", "error", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
@@ -424,7 +424,7 @@ func (app *application) RefreshTokenHandler(c *gin.Context) {
 	}
 
 	duration := time.Since(start).Seconds()
-	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+	DbQueryDuration.WithLabelValues("refresh_token").Observe(duration)
 	c.IndentedJSON(http.StatusOK, gin.H{"access_token": token.AccessToken, "refresh_token": token.RefreshToken, "expires_in": token.ExpiresIn, "token_type": token.TokenType})
 }
 
@@ -444,7 +444,7 @@ func (app *application) PasswordResetHandler(c *gin.Context) {
 	adminToken, err := app.client.LoginAdmin(ctx, app.config.kc.client_id, app.config.kc.client_secret, app.config.kc.Realm)
 	if err != nil {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("login_admin").Observe(duration)
 		DbQueryErrorsTotal.WithLabelValues("login_admin").Inc()
 		app.logger.Error("Failed to login to Keycloak", "error", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Failed to authenticate with Keycloak"})
@@ -454,14 +454,14 @@ func (app *application) PasswordResetHandler(c *gin.Context) {
 	users, err := app.client.GetUsers(ctx, adminToken.AccessToken, app.config.kc.Realm, gocloak.GetUsersParams{Username: &req.Username})
 	if err != nil || len(users) == 0 {
 		duration := time.Since(start).Seconds()
-		DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+		DbQueryDuration.WithLabelValues("get_user").Observe(duration)
 		DbQueryErrorsTotal.WithLabelValues("get_user").Inc()
 		app.logger.Error("Failed to get user from Keycloak", "error", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 	duration := time.Since(start).Seconds()
-	DbQueryDuration.WithLabelValues(c.Request.Method, c.FullPath()).Observe(duration)
+	DbQueryDuration.WithLabelValues("get_user").Observe(duration)
 
 	User_UUID := *users[0].ID
 
