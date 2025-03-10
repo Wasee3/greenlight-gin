@@ -127,7 +127,7 @@ func initTracer(ctx context.Context) (*trace.TracerProvider, error) {
 	// Create an OTLP gRPC client
 	client := otlptracegrpc.NewClient(
 		otlptracegrpc.WithInsecure(), // Use WithTLS() in production
-		otlptracegrpc.WithEndpoint("172.17.0.2:4317"),
+		otlptracegrpc.WithEndpoint("172.17.0.3:4317"),
 		otlptracegrpc.WithDialOption(grpc.WithBlock()), // Ensures connection is established
 	)
 
