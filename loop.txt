@@ -1,1 +1,0 @@
-cat ~/sample-json-payloads.json | while read -r line; do BODY=$line; curl --data "$BODY" -X POST localhost:20000/v1/movie | jq .; done
