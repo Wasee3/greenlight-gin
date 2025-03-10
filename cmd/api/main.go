@@ -20,6 +20,16 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	"gorm.io/gorm"
+
+	// OpenTelemetry imports
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	oteltrace "go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
 )
 
 const version = "1.0.0"
@@ -55,6 +65,7 @@ type application struct {
 	limiter *LimiterStore
 	audit   *logrus.Logger
 	client  *gocloak.GoCloak
+	tracer  oteltrace.Tracer
 }
 
 func registerMetrics() {
@@ -112,6 +123,43 @@ func startMonitoring(ctx context.Context, db *gorm.DB) {
 	}()
 }
 
+func initTracer(ctx context.Context) (*trace.TracerProvider, error) {
+	// Create an OTLP gRPC client
+	client := otlptracegrpc.NewClient(
+		otlptracegrpc.WithInsecure(), // Use WithTLS() in production
+		otlptracegrpc.WithEndpoint("172.17.0.2:4317"),
+		otlptracegrpc.WithDialOption(grpc.WithBlock()), // Ensures connection is established
+	)
+
+	// Create the OTLP Trace Exporter
+	exporter, err := otlptrace.New(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+
+	// Define OpenTelemetry resource attributes
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String("greenlight-api"),
+			semconv.ServiceVersionKey.String(version),
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a Trace Provider
+	tp := trace.NewTracerProvider(
+		trace.WithSpanProcessor(trace.NewBatchSpanProcessor(exporter)),
+		trace.WithResource(res),
+	)
+
+	// Set the global TracerProvider
+	otel.SetTracerProvider(tp)
+
+	return tp, nil
+}
+
 func main() {
 	var cfg config
 	var rps float64
@@ -148,6 +196,17 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// **Initialize OpenTelemetry**
+	tp, err := initTracer(ctx)
+	if err != nil {
+		logrus.Fatal("Failed to initialize OpenTelemetry: ", err)
+	}
+	defer func() {
+		if err := tp.Shutdown(ctx); err != nil {
+			logrus.Fatal("Error shutting down tracer provider: ", err)
+		}
+	}()
+
 	// Register Prometheus metrics
 	registerMetrics()
 
@@ -177,6 +236,7 @@ func main() {
 		limiter: ltr,
 		audit:   auditLogger,
 		client:  client,
+		tracer:  tp.Tracer("greenlight-api"),
 	}
 
 	// Handle shutdown signals

@@ -9,7 +9,7 @@ func (app *application) routes() *gin.Engine {
 
 	router := gin.Default()
 
-	router.Use(app.RateLimiterMiddleware())
+	router.Use(app.RateLimiterMiddleware(), app.TraceMiddleware())
 	router.GET("/v1/healthcheck", app.healthcheckHandler)
 	router.POST("/v1/user/register", app.RegisterUserHandler)
 	router.POST("/v1/user/login", app.LoginUserHandler)

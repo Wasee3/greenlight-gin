@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
+	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/time/rate"
 )
 
@@ -151,5 +152,34 @@ func (app *application) PrometheusMiddleware(c *gin.Context) gin.HandlerFunc {
 			HttpRequestsErrorsTotal.WithLabelValues(c.Request.Method, c.FullPath(), strconv.Itoa(statusCode)).Inc()
 		}
 
+	}
+}
+
+func (app *application) TraceMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		tracer := app.tracer
+		spanCtx, span := tracer.Start(ctx, c.Request.Method+" "+c.FullPath())
+		defer span.End()
+
+		// Extract and add Trace ID for logging
+		traceID := span.SpanContext().TraceID().String()
+		c.Set("traceID", traceID)
+
+		// Pass context with span to next handler
+		c.Request = c.Request.WithContext(spanCtx)
+
+		// Continue processing request
+		c.Next()
+
+		// Capture request metadata using custom attributes
+		span.SetAttributes(
+			attribute.String("http.method", c.Request.Method),          // HTTP method (e.g., GET, POST)
+			attribute.String("http.target", c.Request.URL.Path),        // Request path
+			attribute.String("http.user_agent", c.Request.UserAgent()), // User-Agent header
+			attribute.String("http.client_ip", c.ClientIP()),           // Client IP address
+			attribute.Int("http.status_code", c.Writer.Status()),       // HTTP status code
+		)
 	}
 }
