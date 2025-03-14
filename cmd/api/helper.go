@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand"
 	"slices"
 	"sync"
 	"time"
@@ -15,6 +17,11 @@ import (
 	"golang.org/x/time/rate"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	//Dynamic Service Discovery
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
+	"github.com/hashicorp/consul/api"
 )
 
 var (
@@ -155,4 +162,72 @@ func (app *application) auditLog(c *gin.Context, action, message string) {
 		logEntry["user"] = user
 	}
 	app.audit.WithFields(logEntry).Info()
+}
+
+func getContainerIP(containerName string) (string, error) {
+	// fmt.Println(containerName)
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		fmt.Println(err)
+		return "", err
+	}
+	defer cli.Close()
+	// containers, err := cli.ContainerList(context.Background(), types.ContainerListOptions{All: true})
+	containers, err := cli.ContainerList(context.Background(), container.ListOptions{All: true})
+	if err != nil {
+		return "", err
+	}
+	for _, container := range containers {
+		// fmt.Println(container.Names)
+		for _, name := range container.Names {
+			// fmt.Println(name)
+			if name == containerName { // Match container name
+				containerJSON, err := cli.ContainerInspect(context.Background(), container.ID)
+				// fmt.Println(containerJSON)
+				if err != nil {
+					return "", err
+				}
+
+				for _, network := range containerJSON.NetworkSettings.Networks {
+					// fmt.Println(network.IPAddress)
+					return network.IPAddress, nil // Return the first network IP found
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("container %s not found", containerName)
+}
+
+// Function to query Consul for the Jaeger service
+func getService(tagFilter string, targetPort int, consulIP string) (string, error) {
+	consulAddr := fmt.Sprintf("%s:8500", consulIP)
+	serviceName := fmt.Sprintf("%s-%d", tagFilter, targetPort)
+
+	// Create a new Consul client
+	config := api.DefaultConfig()
+	config.Address = consulAddr
+	client, err := api.NewClient(config)
+	if err != nil {
+		return "", err
+	}
+
+	instances, _, err := client.Health().Service(serviceName, tagFilter, true, nil)
+	if err != nil {
+		return "", errors.New("Problem found while quering service for instances")
+	}
+
+	if len(instances) == 0 {
+		return "", errors.New("No healthy Keycloak instances found")
+	}
+
+	// Pick a random instance
+	selected := instances[rand.Intn(len(instances))]
+
+	// Print the selected instance details
+	fmt.Printf("Randomly selected Keycloak instance: %s:%d\n",
+		selected.Service.Address, selected.Service.Port)
+
+	// Return the selected instance address
+	return fmt.Sprintf("%s:%d", selected.Service.Address, targetPort), nil
 }

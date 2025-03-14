@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -30,6 +31,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const version = "1.0.0"
@@ -124,11 +126,37 @@ func startMonitoring(ctx context.Context, db *gorm.DB) {
 }
 
 func initTracer(ctx context.Context) (*trace.TracerProvider, error) {
+	consulIP, err := getContainerIP("/consul")
+	// fmt.Println(consulIP)
+	if consulIP == "" {
+		return nil, fmt.Errorf("failed to get Consul container IP")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	jaeger, err := getService("jaeger", 4317, consulIP)
+	if err != nil {
+		// fmt.Println(err)
+		return nil, err
+	}
+
+	// // Set a timeout context for connection
+	// cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// defer cancel()
+
+	// Create a gRPC connection with a timeout using DialContext
+	conn, err := grpc.NewClient(jaeger,
+		grpc.WithTransportCredentials(insecure.NewCredentials()), // Use TLS in production
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create an OTLP gRPC client
 	client := otlptracegrpc.NewClient(
-		otlptracegrpc.WithInsecure(), // Use WithTLS() in production
-		otlptracegrpc.WithEndpoint("172.17.0.3:4317"),
-		otlptracegrpc.WithDialOption(grpc.WithBlock()), // Ensures connection is established
+		otlptracegrpc.WithGRPCConn(conn),
+		otlptracegrpc.WithEndpoint(jaeger),
 	)
 
 	// Create the OTLP Trace Exporter
